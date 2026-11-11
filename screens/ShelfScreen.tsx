@@ -5,8 +5,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 
-// ГЛОБАЛЬНЫЙ СПИСОК ФИЛЬТРОВ (ТЕМ)
-// Сюда можно добавлять любые темы, которые ты хочешь использовать
 const AVAILABLE_THEMES = [
   'Марвел', 'DC', 'Азбука', 'Комильфо', 'Bubble', 'Аниме', 
   'Манга', 'Атака титанов', 'Человек-паук', 'Майор Гром', 'Комиксы'
@@ -38,8 +36,13 @@ export default function ShelfScreen() {
   const [editDepth, setEditDepth] = useState('');
   const [editTheme, setEditTheme] = useState('');
 
-  // Состояние для кастомного ввода темы (если нет в списке)
+  // Состояние для кастомного ввода темы
   const [isCustomTheme, setIsCustomTheme] = useState(false);
+
+  // --- СОСТОЯНИЯ ДЛЯ ПЕРЕМЕЩЕНИЯ ПОЛКИ ---
+  const [moveModalVisible, setMoveModalVisible] = useState(false);
+  const [levelToMove, setLevelToMove] = useState<any>(null);
+  const [otherShelves, setOtherShelves] = useState<any[]>([]);
 
   const fetchLevels = async () => {
     setLoading(true);
@@ -53,9 +56,20 @@ export default function ShelfScreen() {
     setLoading(false);
   };
 
+  const fetchOtherShelves = async () => {
+    const { data } = await supabase.from('shelves').select('id, name');
+    if (data) {
+      // Убираем из списка текущий стеллаж
+      setOtherShelves(data.filter(s => s.id !== shelfId));
+    }
+  };
+
   useFocusEffect(
     React.useCallback(() => {
-      if (shelfId) fetchLevels();
+      if (shelfId) {
+        fetchLevels();
+        fetchOtherShelves();
+      }
     }, [shelfId])
   );
 
@@ -92,9 +106,17 @@ export default function ShelfScreen() {
     setEditWidth(level.width_mm.toString());
     setEditHeight(level.height_mm.toString());
     setEditDepth(level.depth_mm.toString());
-    setEditTheme(level.reserved_theme || '');
-    // Если тема есть, но её нет в списке стандартных - включаем кастомный ввод
-    if (level.reserved_theme && !AVAILABLE_THEMES.includes(level.reserved_theme)) {
+    
+    // Если тема — массив, склеиваем в строку через запятую для редактирования
+    let themeString = '';
+    if (Array.isArray(level.reserved_theme)) {
+      themeString = level.reserved_theme.join(', ');
+    } else if (typeof level.reserved_theme === 'string') {
+      themeString = level.reserved_theme;
+    }
+    setEditTheme(themeString);
+
+    if (themeString && !AVAILABLE_THEMES.includes(themeString)) {
       setIsCustomTheme(true);
     } else {
       setIsCustomTheme(false);
@@ -127,6 +149,31 @@ export default function ShelfScreen() {
     }
   };
 
+  // --- ФУНКЦИЯ ПЕРЕМЕЩЕНИЯ ---
+  const openMoveModal = (level: any) => {
+    setLevelToMove(level);
+    setMoveModalVisible(true);
+  };
+
+  const handleMoveLevel = async (targetShelfId: string) => {
+    if (!levelToMove) return;
+    
+    // Меняем привязку полки к стеллажу
+    const { error } = await supabase
+      .from('levels')
+      .update({ shelf_id: targetShelfId })
+      .eq('id', levelToMove.id);
+
+    if (error) {
+      Alert.alert('Ошибка переноса', error.message);
+    } else {
+      Alert.alert("Успех", "Полка и все книги на ней перенесены на другой стеллаж.");
+      setMoveModalVisible(false);
+      setLevelToMove(null);
+      fetchLevels(); // Обновляем список (полка исчезнет отсюда)
+    }
+  };
+
   const deleteLevel = async (levelId: string) => {
     Alert.alert("Удалить полку?", "Все комиксы с неё упадут на склад.", [
       { text: "Отмена", style: "cancel" },
@@ -138,7 +185,6 @@ export default function ShelfScreen() {
     ]);
   };
 
-  // Рендер тегов (кнопок с темами)
   const renderThemeSelector = (selectedTheme: string, onSelect: (val: string) => void) => (
     <View style={{ marginBottom: 16 }}>
       <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#333', marginBottom: 8 }}>Тема (фильтр):</Text>
@@ -147,17 +193,17 @@ export default function ShelfScreen() {
           {AVAILABLE_THEMES.map(t => (
             <TouchableOpacity 
               key={t} 
-              style={[styles.tagBtn, selectedTheme === t && styles.tagBtnActive]}
-              onPress={() => onSelect(selectedTheme === t ? '' : t)}
+              style={[styles.tagBtn, selectedTheme.includes(t) && styles.tagBtnActive]}
+              onPress={() => onSelect(selectedTheme.includes(t) ? '' : t)}
             >
-              <Text style={[styles.tagText, selectedTheme === t && styles.tagTextActive]}>{t}</Text>
+              <Text style={[styles.tagText, selectedTheme.includes(t) && styles.tagTextActive]}>{t}</Text>
             </TouchableOpacity>
           ))}
           <TouchableOpacity 
             style={[styles.tagBtn, { backgroundColor: isCustomTheme ? '#007AFF' : '#e0e0e0' }]}
             onPress={() => {
               setIsCustomTheme(true);
-              onSelect(''); // очищаем выбранную стандартную
+              onSelect(''); 
             }}
           >
             <Text style={[styles.tagText, isCustomTheme && { color: 'white' }]}>Другая...</Text>
@@ -206,9 +252,15 @@ export default function ShelfScreen() {
                 </TouchableOpacity>
                 
                 <View style={styles.actions}>
+                  {/* Кнопка перемещения */}
+                  <TouchableOpacity style={styles.iconBtn} onPress={() => openMoveModal(level)}>
+                    <Ionicons name="swap-horizontal" size={20} color="#f39c12" />
+                  </TouchableOpacity>
+                  {/* Кнопка редактирования */}
                   <TouchableOpacity style={styles.iconBtn} onPress={() => openEditModal(level)}>
                     <Ionicons name="pencil" size={20} color="#007AFF" />
                   </TouchableOpacity>
+                  {/* Кнопка удаления */}
                   <TouchableOpacity style={styles.iconBtn} onPress={() => deleteLevel(level.id)}>
                     <Ionicons name="trash" size={20} color="#e74c3c" />
                   </TouchableOpacity>
@@ -272,6 +324,39 @@ export default function ShelfScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* МОДАЛКА ПЕРЕМЕЩЕНИЯ ПОЛКИ */}
+      <Modal visible={moveModalVisible} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '70%' }]}>
+            <Text style={styles.modalTitle}>Переместить полку</Text>
+            <Text style={{ fontSize: 14, color: '#666', marginBottom: 16 }}>
+              Выберите стеллаж, на который нужно перенести <Text style={{fontWeight: 'bold'}}>Полку №{levelToMove?.position}</Text>. 
+              Все книги переедут вместе с ней.
+            </Text>
+            
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {otherShelves.map(s => (
+                <TouchableOpacity 
+                  key={s.id} 
+                  style={styles.shelfOption} 
+                  onPress={() => handleMoveLevel(s.id)}
+                >
+                  <Ionicons name="library" size={20} color="#007AFF" style={{ marginRight: 10 }} />
+                  <Text style={{ fontSize: 16, color: '#333' }}>{s.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={[styles.modalBtn, { backgroundColor: '#ccc' }]} onPress={() => setMoveModalVisible(false)}>
+                <Text>Отмена</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -286,7 +371,7 @@ const styles = StyleSheet.create({
   levelDetails: { color: '#666', fontSize: 14 },
   themeBadge: { backgroundColor: '#f39c12', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, alignSelf: 'flex-start', marginBottom: 4 },
   themeText: { color: 'white', fontWeight: 'bold', fontSize: 10 },
-  actions: { flexDirection: 'row', gap: 8 },
+  actions: { flexDirection: 'row', gap: 4 },
   iconBtn: { padding: 8 },
   button: { backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 8 },
   buttonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
@@ -301,5 +386,7 @@ const styles = StyleSheet.create({
   tagBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f0f0f0', borderWidth: 1, borderColor: '#ddd' },
   tagBtnActive: { backgroundColor: '#e6f2ff', borderColor: '#007AFF' },
   tagText: { fontSize: 14, color: '#333' },
-  tagTextActive: { color: '#007AFF', fontWeight: 'bold' }
+  tagTextActive: { color: '#007AFF', fontWeight: 'bold' },
+
+  shelfOption: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: '#f9f9f9', borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#eee' }
 });

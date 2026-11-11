@@ -14,7 +14,7 @@ import AddToShelfScreen from './screens/AddToShelfScreen';
 import CatalogScreen from './screens/CatalogScreen';
 import ScannerScreen from './screens/ScannerScreen';
 import StorageScreen from './screens/StorageScreen';
-import SearchScreen from './screens/SearchScreen';
+import QuickScanScreen from './screens/QuickScanScreen'; // <-- ДОБАВИЛИ
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -39,21 +39,14 @@ function MainTabs() {
         }} 
       />
       <Tab.Screen 
-  name="StorageTab" 
-  component={StorageScreen} 
-  options={{ 
-    title: 'Склад',
-    tabBarIcon: ({ color, size }) => <Ionicons name="cube" size={size} color={color} />
-  }} 
-/>
-<Tab.Screen 
-  name="SearchTab" 
-  component={SearchScreen} 
-  options={{ 
-    title: 'Поиск',
-    tabBarIcon: ({ color, size }) => <Ionicons name="search" size={size} color={color} />
-  }} 
-/>
+        name="StorageTab" 
+        component={StorageScreen} 
+        options={{ 
+          title: 'Склад',
+          tabBarIcon: ({ color, size }) => <Ionicons name="cube" size={size} color={color} />
+        }} 
+      />
+      {/* SearchTab УДАЛЕН */}
     </Tab.Navigator>
   );
 }
@@ -69,6 +62,8 @@ export default function App() {
             <Stack.Screen name="Level" component={LevelScreen} options={{ title: 'Полка' }} />
             <Stack.Screen name="AddToShelf" component={AddToShelfScreen} options={{ title: 'Выбор комикса' }} />
             <Stack.Screen name="Scanner" component={ScannerScreen} options={{ title: 'Сканер', headerShown: true }} />
+            {/* ДОБАВИЛИ НОВЫЙ ЭКРАН (без шапки, чтобы камера была на весь экран) */}
+            <Stack.Screen name="QuickScan" component={QuickScanScreen} options={{ headerShown: false }} />
           </Stack.Navigator>
         </NavigationContainer>
       </SafeAreaProvider>
