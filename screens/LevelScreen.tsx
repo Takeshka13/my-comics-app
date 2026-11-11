@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Image, Dimensions } from 'react-native';
 import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#34495e', '#e67e22', '#16a085', '#c0392b'];
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 export default function LevelScreen() {
   const route = useRoute<any>();
@@ -70,101 +71,101 @@ export default function LevelScreen() {
   if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#007AFF" /></View>;
   if (!levelId) return <View style={styles.center}><Text>Ошибка: полка не найдена</Text></View>;
 
-  // Считаем занятую ширину (только для передних экземпляров)
+  const shelfWidthMm = levelData?.width_mm || 800;
   const usedWidth = groupedItems.reduce((sum, item) => sum + item.width_mm, 0);
-  const freeWidth = (levelData?.width_mm || 0) - usedWidth;
+  const freeWidth = shelfWidthMm - usedWidth;
   
-  // Проверка на переполнение
-  const isOverflow = freeWidth < 0;
+  const visualAreaWidth = SCREEN_WIDTH - 40; 
 
   return (
     <View style={[styles.container, { paddingBottom: insets.bottom + 16 }]}>
       <Text style={styles.title}>{levelName || 'Полка'}</Text>
       
-      <View style={[styles.statsCard, isOverflow && { borderColor: '#e74c3c', borderWidth: 2 }]}>
-        <Text style={styles.statsText}>Длина полки: {levelData?.width_mm} мм</Text>
+      <View style={[styles.statsCard, freeWidth < 0 && { borderColor: '#e74c3c', borderWidth: 2 }]}>
+        <Text style={styles.statsText}>Длина полки: {shelfWidthMm} мм</Text>
         <Text style={styles.statsText}>Занято: {usedWidth} мм</Text>
         <Text style={[styles.statsText, { fontWeight: 'bold', color: freeWidth >= 0 ? 'green' : 'red' }]}>
           Свободно: {freeWidth} мм
         </Text>
-        {isOverflow && (
-          <Text style={{ color: '#e74c3c', fontSize: 12, marginTop: 4 }}>
-            Внимание! Полка переполнена. Рекомендуется убрать книги или увеличить размер полки.
-          </Text>
-        )}
       </View>
 
       {/* Визуализация полки */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.shelfWrapper}>
+      <View style={styles.shelfContainer}>
         <View style={styles.shelfVisual}>
-          {groupedItems.length === 0 ? (
-            <Text style={{ color: '#888', alignSelf: 'center', width: 100, textAlign: 'center' }}>Пусто</Text>
-          ) : (
-            groupedItems.map((item, index) => (
-              <TouchableOpacity 
+          {groupedItems.map((item, index) => {
+            const widthPercent = item.width_mm / shelfWidthMm;
+            const pixelWidth = Math.max(4, widthPercent * visualAreaWidth); 
+            
+            const heightPercent = Math.min(1, item.height_mm / (levelData?.height_mm || 300));
+            const pixelHeight = heightPercent * 100; 
+
+            return (
+              <View 
                 key={item.id} 
                 style={[
                   styles.bookSpine, 
                   { 
-                    width: Math.max(12, item.width_mm / 2),
-                    height: Math.min(100, (item.height_mm / (levelData?.height_mm || 300)) * 100), 
+                    width: pixelWidth,
+                    height: pixelHeight, 
                     backgroundColor: item.color
                   }
-                ]} 
-                onPress={() => {
-                  if (item.count > 1) {
-                    Alert.alert(
-                      item.titles.name,
-                      `На полке ${item.count} экз.`,
-                      [
-                        { text: "Закрыть", style: "cancel" },
-                        { text: "Убрать 1 (передний)", onPress: () => removeFromShelf(item.allIds, false) },
-                        { text: "Убрать все", style: "destructive", onPress: () => removeFromShelf(item.allIds, true) }
-                      ]
-                    );
-                  } else {
-                    Alert.alert(
-                      item.titles.name,
-                      `Толщина: ${item.width_mm} мм\nИздательство: ${item.titles.publisher || '-'}`,
-                      [
-                        { text: "Закрыть", style: "cancel" },
-                        { text: "Убрать с полки", style: "destructive", onPress: () => removeFromShelf(item.allIds, true) }
-                      ]
-                    );
-                  }
-                }}
+                ]}
               >
-                {item.count > 1 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>+{item.count - 1}</Text>
+                {/* Обложка (если есть) */}
+                {item.titles?.cover_url && (
+                  <View style={{ flex: 1, width: '100%', overflow: 'hidden', borderTopLeftRadius: 3, borderTopRightRadius: 3 }}>
+                    <Image 
+                      source={{ uri: item.titles.cover_url }} 
+                      style={{ width: '100%', height: '100%', opacity: 0.8 }} 
+                      resizeMode="cover"
+                    />
                   </View>
                 )}
-              </TouchableOpacity>
-            ))
+              </View>
+            );
+          })}
+
+          {/* Свободное место */}
+          {freeWidth > 0 && (
+            <View style={styles.freeSpaceBlock}>
+              <Text style={{ fontSize: 10, color: '#aaa' }}>Свободно</Text>
+            </View>
           )}
         </View>
-      </ScrollView>
+        
+        {/* Деревянная полка снизу */}
+        <View style={styles.shelfBoard} />
+      </View>
 
-      {/* СПИСОК КНИГ (как ты просил) */}
       <Text style={styles.listTitle}>Книги на полке:</Text>
-      <ScrollView style={styles.list}>
+      
+      <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
         {groupedItems.length === 0 ? (
           <Text style={{ textAlign: 'center', marginTop: 10, color: '#888' }}>Пусто</Text>
         ) : (
-          groupedItems.map((item, index) => (
+          groupedItems.map((item) => (
             <View key={item.id} style={styles.listItem}>
-              <View style={[styles.colorIndicator, { backgroundColor: item.color }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.listItemTitle}>
+              {/* Миниатюра обложки */}
+              {item.titles?.cover_url ? (
+                <Image source={{ uri: item.titles.cover_url }} style={styles.listImage} />
+              ) : (
+                <View style={[styles.listImage, { backgroundColor: item.color, justifyContent: 'center', alignItems: 'center' }]}>
+                  <Ionicons name="book" size={20} color="white" />
+                </View>
+              )}
+
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.listItemTitle} numberOfLines={2}>
                   {item.titles.name} {item.titles.volume ? `(Том ${item.titles.volume})` : ''}
                 </Text>
-                <Text style={styles.listItemSubtitle}>
-                  {item.titles.author || 'Автор не указан'} | {item.titles.publisher || 'Без издательства'}
+                <Text style={styles.listItemSubtitle} numberOfLines={1}>
+                  {item.titles.publisher || 'Без издательства'} {item.titles.author ? `| ${item.titles.author}` : ''}
                 </Text>
                 <Text style={styles.listItemDetails}>
-                  Толщина: {item.width_mm} мм | Экземпляров: {item.count}
+                  Экземпляров: {item.count}
                 </Text>
               </View>
+
               <TouchableOpacity 
                 style={styles.removeBtn} 
                 onPress={() => {
@@ -194,58 +195,72 @@ export default function LevelScreen() {
         }}
       >
         <Ionicons name="add" size={20} color="white" />
-        <Text style={styles.buttonText}>Поставить комикс</Text>
+        <Text style={styles.buttonText}>Поставить комиксы</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f2f5', padding: 16 },
+  container: { flex: 1, backgroundColor: '#f0f2f5', paddingHorizontal: 16, paddingTop: 16 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   title: { fontSize: 22, fontWeight: 'bold', color: '#333', marginBottom: 16 },
+  
   statsCard: { backgroundColor: 'white', padding: 16, borderRadius: 8, marginBottom: 16, borderWidth: 1, borderColor: '#ddd' },
   statsText: { fontSize: 16, color: '#333', marginBottom: 4 },
   
-  shelfWrapper: { flexGrow: 0, marginBottom: 16 },
+  shelfContainer: { marginBottom: 20 },
   shelfVisual: { 
     flexDirection: 'row', 
     alignItems: 'flex-end', 
-    backgroundColor: '#dcdcdc', 
-    height: 120, 
-    padding: 8, 
-    borderRadius: 8, 
-    borderBottomWidth: 6,
-    borderBottomColor: '#8b4513',
-    gap: 2
+    height: 110, 
+    paddingHorizontal: 2,
+    paddingTop: 10,
+    gap: 2,
+    backgroundColor: '#e8e8e8',
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    overflow: 'hidden', 
   },
+  shelfBoard: {
+    height: 8,
+    backgroundColor: '#8b4513',
+    borderBottomLeftRadius: 4,
+    borderBottomRightRadius: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+
   bookSpine: { 
-    borderRadius: 3,
-    elevation: 2,
+    borderTopLeftRadius: 3,
+    borderTopRightRadius: 3,
     position: 'relative',
     justifyContent: 'flex-start',
     alignItems: 'center',
-    paddingTop: 4
   },
-  badge: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    position: 'absolute',
-    top: 4,
+
+  freeSpaceBlock: {
+    flex: 1, 
+    height: 100,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    borderRadius: 4,
     borderWidth: 1,
-    borderColor: '#ccc'
+    borderColor: 'rgba(0,0,0,0.1)',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  badgeText: { fontSize: 10, fontWeight: 'bold', color: '#333' },
 
   listTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 8 },
   list: { flex: 1, marginBottom: 16 },
-  listItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', padding: 12, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#ddd' },
-  colorIndicator: { width: 16, height: 40, borderRadius: 4, marginRight: 12 },
-  listItemTitle: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  listItemSubtitle: { fontSize: 12, color: '#666', marginTop: 2 },
-  listItemDetails: { fontSize: 12, color: '#888', marginTop: 2 },
+  listItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', padding: 10, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#ddd' },
+  listImage: { width: 40, height: 60, borderRadius: 4, backgroundColor: '#eee' },
+  listItemTitle: { fontSize: 15, fontWeight: 'bold', color: '#333' },
+  listItemSubtitle: { fontSize: 13, color: '#666', marginTop: 2 },
+  listItemDetails: { fontSize: 12, color: '#007AFF', marginTop: 4, fontWeight: 'bold' },
   removeBtn: { padding: 8 },
 
   button: { backgroundColor: '#007AFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 8 },
