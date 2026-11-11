@@ -1,0 +1,29 @@
+# Зависимости
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Файлы окружения (СЕКРЕТЫ!)
+.env
+.env*.local
+
+# Системные файлы
+.DS_Store
+*.pem
+
+# Логи и отладка
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.expo-shared/
+
+# Прочее
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
