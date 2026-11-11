@@ -1,19 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Modal, TextInput, Alert, ScrollView, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Barcode from 'react-native-barcode-svg';
 import { supabase } from '../lib/supabase';
 
 export default function CatalogScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
-  const route = useRoute<any>();
 
   const [titles, setTitles] = useState<any[]>([]);
+  const [filteredTitles, setFilteredTitles] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   
+  // Стейты для добавления нового издания
   const [modalVisible, setModalVisible] = useState(false);
   const [name, setName] = useState('');
   const [author, setAuthor] = useState('');
@@ -26,11 +28,13 @@ export default function CatalogScreen() {
   const [cover, setCover] = useState('');
   const [isbn, setIsbn] = useState('');
 
+  // Стейты для карточки книги
   const [manageModalVisible, setManageModalVisible] = useState(false);
   const [selectedTitle, setSelectedTitle] = useState<any>(null);
   const [titleCopies, setTitleCopies] = useState<any[]>([]);
   const [suggesting, setSuggesting] = useState(false);
 
+  // Стейты для редактирования
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editTitleId, setEditTitleId] = useState('');
   const [editName, setEditName] = useState('');
@@ -47,64 +51,87 @@ export default function CatalogScreen() {
 
   const fetchTitles = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('titles')
-      .select(`*, copies ( id, width_mm, height_mm, depth_mm, level_id )`)
-      .order('created_at', { ascending: false });
-      
-    if (!error) setTitles(data || []);
+    let allTitles: any[] = [];
+    let from = 0;
+    let to = 999;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('titles')
+        .select(`*, copies ( id, width_mm, height_mm, depth_mm, level_id )`)
+        .order('created_at', { ascending: false })
+        .range(from, to);
+        
+      if (error) break;
+
+      if (data && data.length > 0) {
+        allTitles = [...allTitles, ...data];
+        from += 1000;
+        to += 1000;
+        if (data.length < 1000) hasMore = false;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    setTitles(allTitles);
+    setFilteredTitles(allTitles);
     setLoading(false);
   };
 
-  const totalPhysicalCopies = titles.reduce((sum, title) => sum + (title.copies?.length || 0), 0);
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setFilteredTitles(titles);
+    } else {
+      const lowerQuery = searchQuery.toLowerCase();
+      const filtered = titles.filter(t => 
+        t.name?.toLowerCase().includes(lowerQuery) ||
+        t.author?.toLowerCase().includes(lowerQuery) ||
+        t.series?.toLowerCase().includes(lowerQuery) ||
+        t.publisher?.toLowerCase().includes(lowerQuery)
+      );
+      setFilteredTitles(filtered);
+    }
+  }, [searchQuery, titles]);
 
   useFocusEffect(
     React.useCallback(() => {
       fetchTitles();
+      const params = (navigation.getState().routes.find((r: any) => r.name === 'CatalogTab')?.params) as any;
       
-      if (route.params?.scannedData) {
-        const data = route.params.scannedData;
-        setName(data.name || '');
-        setAuthor(data.author || '');
-        setPublisher(data.publisher || '');
-        setSeries(data.series || '');
-        setCover(data.cover || '');
-        setIsbn(data.isbn || '');
-        
-        if (data.volume) setVolume(data.volume.toString());
-        if (data.width) setWidth(data.width.toString());
-        if (data.height) setHeight(data.height.toString());
-        if (data.depth) setDepth(data.depth.toString());
-
+      if (params?.scannedData) {
+        setName(params.scannedData.name || '');
+        setAuthor(params.scannedData.author || '');
+        setPublisher(params.scannedData.publisher || '');
+        setSeries(params.scannedData.series || '');
+        setCover(params.scannedData.cover || '');
+        setIsbn(params.scannedData.isbn || '');
+        if (params.scannedData.volume) setVolume(params.scannedData.volume.toString());
+        if (params.scannedData.width) setWidth(params.scannedData.width.toString());
+        if (params.scannedData.height) setHeight(params.scannedData.height.toString());
+        if (params.scannedData.depth) setDepth(params.scannedData.depth.toString());
         setModalVisible(true);
         navigation.setParams({ scannedData: null });
       }
 
-      if (route.params?.openTitleId) {
-        setTargetTitleId(route.params.openTitleId);
-        // Параметр НЕ стираем здесь, чтобы он дожил до загрузки данных
+      if (params?.openTitleId) {
+        setTargetTitleId(params.openTitleId);
+        navigation.setParams({ openTitleId: null });
       }
-    }, [route.params, navigation])
+    }, [navigation])
   );
 
-  // Открываем модалку, когда список загрузился
   React.useEffect(() => {
     if (targetTitleId && titles.length > 0) {
       const found = titles.find(t => t.id === targetTitleId);
-      if (found) {
-        openManageModal(found);
-        // Стираем параметр только после успешного открытия
-        navigation.setParams({ openTitleId: null });
-      }
+      if (found) openManageModal(found);
       setTargetTitleId(null);
     }
-  }, [targetTitleId, titles, navigation]);
+  }, [targetTitleId, titles]);
 
   const handleAddTitle = async () => {
-    if (!name.trim() || !width || !height) {
-      Alert.alert('Ошибка', 'Заполните название и размеры (толщину и высоту)');
-      return;
-    }
+    if (!name.trim() || !width || !height) return Alert.alert('Ошибка', 'Заполните название и размеры');
 
     const { data: titleData, error: titleError } = await supabase
       .from('titles')
@@ -116,58 +143,91 @@ export default function CatalogScreen() {
 
     if (titleError) return Alert.alert('Ошибка базы', titleError.message);
 
-    const { error: copyError } = await supabase
-      .from('copies')
-      .insert([{ title_id: titleData.id, width_mm: parseInt(width), height_mm: parseInt(height), depth_mm: depth ? parseInt(depth) : parseInt(width), status: 'storage' }]);
+    await supabase.from('copies').insert([{ title_id: titleData.id, width_mm: parseInt(width), height_mm: parseInt(height), depth_mm: depth ? parseInt(depth) : parseInt(width), status: 'storage' }]);
 
-    if (copyError) {
-      Alert.alert('Ошибка экземпляра', copyError.message);
-    } else {
-      setName(''); setAuthor(''); setPublisher(''); setSeries(''); setVolume(''); setWidth(''); setHeight(''); setDepth(''); setCover(''); setIsbn('');
-      setModalVisible(false);
-      fetchTitles();
-    }
+    setName(''); setAuthor(''); setPublisher(''); setSeries(''); setVolume(''); setWidth(''); setHeight(''); setDepth(''); setCover(''); setIsbn('');
+    setModalVisible(false);
+    fetchTitles();
   };
 
   const openManageModal = async (title: any) => {
     setSelectedTitle(title);
     setManageModalVisible(true);
     
-    const { data } = await supabase
-      .from('copies')
-      .select(`
-        id, width_mm, level_id,
-        levels (
-          id, position,
-          shelves ( id, name )
-        )
-      `)
-      .eq('title_id', title.id);
-      
+    const { data } = await supabase.from('copies').select(`id, width_mm, level_id, levels ( id, position, shelves ( id, name ) )`).eq('title_id', title.id);
     setTitleCopies(data || []);
   };
 
   const addCopyToTitle = async () => {
     if (!selectedTitle) return;
-    const { error } = await supabase.from('copies').insert([{
+    await supabase.from('copies').insert([{
       title_id: selectedTitle.id, width_mm: selectedTitle.default_width_mm || 15,
       height_mm: selectedTitle.default_height_mm || 250, depth_mm: selectedTitle.default_depth_mm || 15, status: 'storage'
     }]);
-    if (!error) {
-      const { data } = await supabase.from('copies').select('*').eq('title_id', selectedTitle.id).order('created_at');
-      setTitleCopies(data || []);
-      fetchTitles();
-    }
+    openManageModal(selectedTitle);
+    fetchTitles();
   };
 
   const removeCopy = async () => {
-    if (!selectedTitle || titleCopies.length === 0) return Alert.alert('Внимание', 'Уже 0 экземпляров.');
+    if (!selectedTitle || titleCopies.length === 0) return;
     const copyToRemove = titleCopies[titleCopies.length - 1];
     if (copyToRemove.level_id) await supabase.from('copies').update({ level_id: null }).eq('id', copyToRemove.id);
     await supabase.from('copies').delete().eq('id', copyToRemove.id);
-    const { data } = await supabase.from('copies').select('*').eq('title_id', selectedTitle.id);
-    setTitleCopies(data || []);
+    openManageModal(selectedTitle);
     fetchTitles();
+  };
+
+  const handleSuggestFromCatalog = async () => {
+    const copyToPlace = titleCopies.find(c => !c.level_id);
+    if (!copyToPlace) return Alert.alert("Ошибка", "Нет свободных экземпляров на складе");
+    
+    setSuggesting(true);
+    const { series, publisher, author, name } = selectedTitle;
+    let targetLevel = null;
+
+    if (series) {
+      const { data } = await supabase.from('copies').select(`level_id, levels ( id, position, shelves ( name ) ), titles!inner ( series )`).ilike('titles.series', `%${series.split(';')[0].trim()}%`).not('level_id', 'is', null).limit(1);
+      if (data && data.length > 0) targetLevel = data[0].levels as any;
+    }
+
+    if (!targetLevel && publisher) {
+      const parts = publisher.split(';').map((p: string) => p.trim());
+      for (const part of parts) {
+        if (part.length < 3) continue;
+        const { data } = await supabase.from('copies').select(`level_id, levels ( id, position, shelves ( name ) ), titles!inner ( publisher )`).ilike('titles.publisher', `%${part}%`).not('level_id', 'is', null).limit(1);
+        if (data && data.length > 0) { targetLevel = data[0].levels as any; break; }
+      }
+    }
+
+    if (!targetLevel && author) {
+      const { data } = await supabase.from('copies').select(`level_id, levels ( id, position, shelves ( name ) ), titles!inner ( author )`).ilike('titles.author', `%${author.split(',')[0].trim()}%`).not('level_id', 'is', null).limit(1);
+      if (data && data.length > 0) targetLevel = data[0].levels as any;
+    }
+
+    if (!targetLevel) {
+      const searchWord = (series || name || '').split(' ')[0]; 
+      if (searchWord.length > 2) {
+        const { data: levels } = await supabase.from('levels').select('id, position, shelves(name), reserved_theme').not('reserved_theme', 'is', null);
+        if (levels) {
+          const matchedLevel = levels.find(l => l.reserved_theme?.some((theme: string) => 
+            searchWord.toLowerCase().includes(theme.toLowerCase()) || theme.toLowerCase().includes(searchWord.toLowerCase())
+          ));
+          if (matchedLevel) targetLevel = matchedLevel;
+        }
+      }
+    }
+
+    setSuggesting(false);
+
+    if (targetLevel) {
+      Alert.alert("Рекомендация", `Найдено место: ${targetLevel.shelves.name}, Полка №${targetLevel.position}.\n\nПоставить туда?`, [
+        { text: "Отмена", style: "cancel" },
+        { text: "Поставить", onPress: async () => {
+            await supabase.from('copies').update({ level_id: targetLevel.id, status: 'on_shelf' }).eq('id', copyToPlace.id);
+            setManageModalVisible(false); fetchTitles();
+        }}
+      ]);
+    } else Alert.alert("Рекомендация", "Подходящих полок не найдено.");
   };
 
   const openEditModal = () => {
@@ -224,56 +284,32 @@ export default function CatalogScreen() {
     ]);
   };
 
-  const handleSuggestFromCatalog = async () => {
-    const copyToPlace = titleCopies.find(c => !c.level_id);
-    if (!copyToPlace) return Alert.alert("Ошибка", "Нет свободных экземпляров на складе");
-    setSuggesting(true);
-    const series = selectedTitle.series; const publisher = selectedTitle.publisher; let targetLevel = null;
-
-    if (series) {
-      const { data } = await supabase.from('copies').select(`level_id, levels ( id, position, shelves ( name ) ), titles!inner ( series )`).ilike('titles.series', `%${series.split(';')[0].trim()}%`).not('level_id', 'is', null).limit(1);
-      if (data && data.length > 0) targetLevel = data[0].levels as any;
-    }
-
-    if (!targetLevel && publisher) {
-      const publisherParts = publisher.split(';').map((p: string) => p.trim());
-      for (const part of publisherParts) {
-        if (part.length < 3) continue;
-        const { data } = await supabase.from('copies').select(`level_id, levels ( id, position, shelves ( name ) ), titles!inner ( publisher )`).ilike('titles.publisher', `%${part}%`).not('level_id', 'is', null).limit(1);
-        if (data && data.length > 0) { targetLevel = data[0].levels as any; break; }
-      }
-    }
-
-    setSuggesting(false);
-
-    if (targetLevel) {
-      Alert.alert("Рекомендация", `Найдено место: ${targetLevel.shelves.name}, Полка №${targetLevel.position}.\n\nПоставить туда?`, [
-        { text: "Отмена", style: "cancel" },
-        { text: "Поставить", onPress: async () => {
-            await supabase.from('copies').update({ level_id: targetLevel.id, status: 'on_shelf' }).eq('id', copyToPlace.id);
-            setManageModalVisible(false); fetchTitles();
-        }}
-      ]);
-    } else Alert.alert("Рекомендация", "Подходящих полок не найдено.");
-  };
-
   return (
     <View style={[styles.container, { paddingTop: insets.top + 10 }]}>
+      <Text style={styles.title}>Каталог</Text>
       
-      <View style={styles.headerContainer}>
-        <Text style={styles.title}>Каталог</Text>
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{titles.length} наим.</Text>
-        </View>
-        <View style={[styles.badge, { backgroundColor: '#34C759' }]}>
-          <Text style={styles.badgeText}>{totalPhysicalCopies} шт.</Text>
-        </View>
+      <View style={styles.searchBar}>
+        <Ionicons name="search" size={20} color="#888" style={{ marginRight: 8 }} />
+        <TextInput 
+          style={styles.searchInput}
+          placeholder="Поиск по названию, автору, серии..."
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <Ionicons name="close-circle" size={20} color="#888" />
+          </TouchableOpacity>
+        )}
       </View>
 
       {loading ? <ActivityIndicator size="large" color="#007AFF" style={{ marginTop: 50 }} /> : (
         <FlatList
-          data={titles} keyExtractor={(item) => item.id} contentContainerStyle={{ paddingBottom: insets.bottom + 80 }} showsVerticalScrollIndicator={false}
-          ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 50, color: '#888' }}>В каталоге пока пусто</Text>}
+          data={filteredTitles}
+          keyExtractor={(item) => item.id} 
+          contentContainerStyle={{ paddingBottom: insets.bottom + 80 }} 
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 50, color: '#888' }}>Ничего не найдено</Text>}
           renderItem={({ item }) => {
             const totalCopies = item.copies?.length || 0;
             const onShelf = item.copies?.filter((c: any) => c.level_id).length || 0;
@@ -392,11 +428,7 @@ export default function CatalogScreen() {
                       locations[key] = (locations[key] || 0) + 1;
                     }
                   });
-
-                  const message = Object.entries(locations)
-                    .map(([loc, count]) => `• ${loc} (${count} шт.)`)
-                    .join('\n');
-
+                  const message = Object.entries(locations).map(([loc, count]) => `• ${loc} (${count} шт.)`).join('\n');
                   Alert.alert("Где лежит книга", message || "На полках нет экземпляров");
                 }}
               >
@@ -461,10 +493,11 @@ export default function CatalogScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f2f5', paddingHorizontal: 16 },
-  headerContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#333' },
-  badge: { backgroundColor: '#007AFF', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginLeft: 10 },
-  badgeText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
+  title: { fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 16 },
+  
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: '#ddd', marginBottom: 16 },
+  searchInput: { flex: 1, fontSize: 16, color: '#333' },
+
   card: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#ddd' },
   coverImage: { width: 50, height: 75, borderRadius: 6, backgroundColor: '#eee' },
   noCover: { justifyContent: 'center', alignItems: 'center' },

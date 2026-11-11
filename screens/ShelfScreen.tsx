@@ -73,7 +73,7 @@ export default function ShelfScreen() {
         width_mm: parseInt(width),
         height_mm: parseInt(height),
         depth_mm: parseInt(depth),
-        reserved_theme: theme.trim() || null
+        reserved_theme: theme.split(',').map(t => t.trim()).filter(t => t) || null
       }]);
 
     if (error) {
@@ -115,7 +115,7 @@ export default function ShelfScreen() {
         width_mm: parseInt(editWidth),
         height_mm: parseInt(editHeight),
         depth_mm: parseInt(editDepth),
-        reserved_theme: editTheme.trim() || null
+        reserved_theme: editTheme.split(',').map(t => t.trim()).filter(t => t) || null
       })
       .eq('id', editingLevelId);
 
@@ -195,9 +195,9 @@ export default function ShelfScreen() {
                   onPress={() => navigation.navigate('Level', { levelId: level.id, levelName: `Полка №${level.position}` })}
                 >
                   <Text style={styles.levelTitle}>Полка №{level.position}</Text>
-                  {level.reserved_theme && (
+                  {level.reserved_theme && level.reserved_theme.length > 0 && (
                     <View style={styles.themeBadge}>
-                      <Text style={styles.themeText}>{level.reserved_theme}</Text>
+                      <Text style={styles.themeText}>{level.reserved_theme.join(', ')}</Text>
                     </View>
                   )}
                   <Text style={styles.levelDetails}>

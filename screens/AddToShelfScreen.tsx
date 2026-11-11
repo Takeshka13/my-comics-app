@@ -11,21 +11,30 @@ export default function AddToShelfScreen() {
   const { levelId, freeWidth } = route.params || {};
   const insets = useSafeAreaInsets();
 
-  const [allBooks, setAllBooks] = useState<any[]>([]); // Все книги со склада
-  const [displayedBooks, setDisplayedBooks] = useState<any[]>([]); // То, что видим
+  const [allBooks, setAllBooks] = useState<any[]>([]);
+  const [displayedBooks, setDisplayedBooks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [shelfTheme, setShelfTheme] = useState<string | null>(null);
+  
+  // Теперь тема полки — это массив строк (или пустой массив)
+  const [shelfThemes, setShelfThemes] = useState<string[]>([]);
   const [ignoreTheme, setIgnoreTheme] = useState(false); 
 
   useEffect(() => {
     const init = async () => {
       setLoading(true);
       
-      // Узнаем тему полки
+      // Узнаем темы полки
       if (levelId) {
         const { data } = await supabase.from('levels').select('reserved_theme').eq('id', levelId).single();
-        if (data?.reserved_theme) setShelfTheme(data.reserved_theme);
+        if (data?.reserved_theme) {
+          // Если в базе массив — оставляем как есть, если строка — разбиваем
+          if (Array.isArray(data.reserved_theme)) {
+            setShelfThemes(data.reserved_theme);
+          } else if (typeof data.reserved_theme === 'string') {
+            setShelfThemes(data.reserved_theme.split(',').map((t: string) => t.trim()));
+          }
+        }
       }
 
       // Загружаем ВСЕ книги со склада
@@ -54,7 +63,6 @@ export default function AddToShelfScreen() {
             title_id: group[0].title_id,
             width_mm: group[0].width_mm,
             height_mm: group[0].height_mm,
-            // Принудительно приводим к строке и нижнему регистру
             titleName: String(t.name || '').trim(),
             titlePublisher: String(t.publisher || '').trim(),
             titleSeries: String(t.series || '').trim(),
@@ -76,40 +84,37 @@ export default function AddToShelfScreen() {
   useEffect(() => {
     let result = [...allBooks];
 
-    // 1. Поиск (ищем по всем трем полям)
+    // 1. Поиск
     if (searchQuery.trim().length > 0) {
       const q = searchQuery.trim().toLowerCase();
-      
       result = result.filter(item => {
-        // Переводим все в нижний регистр для сравнения
         const name = item.titleName.toLowerCase();
         const pub = item.titlePublisher.toLowerCase();
         const ser = item.titleSeries.toLowerCase();
-
-        // Ищем вхождение текста
         return name.includes(q) || pub.includes(q) || ser.includes(q);
       });
     }
 
-    // 2. Фильтр темы
-    if (shelfTheme && !ignoreTheme) {
-      const theme = shelfTheme.trim().toLowerCase();
-      
-      // ВАЖНО: Если пользователь что-то ищет, мы ИГНОРИРУЕМ фильтр темы, 
-      // чтобы он мог найти то, что хочет, даже если полка зарезервирована.
+    // 2. Фильтр темы (если не отключен и есть темы)
+    if (shelfThemes.length > 0 && !ignoreTheme) {
+      // Если пользователь что-то ищет, игнорируем фильтр темы
       if (searchQuery.trim().length === 0) {
         result = result.filter(item => {
           const name = item.titleName.toLowerCase();
           const pub = item.titlePublisher.toLowerCase();
           const ser = item.titleSeries.toLowerCase();
           
-          return name.includes(theme) || pub.includes(theme) || ser.includes(theme);
+          // Проверяем, совпадает ли книга хотя бы с ОДНОЙ темой полки
+          return shelfThemes.some(theme => {
+            const t = theme.toLowerCase();
+            return name.includes(t) || pub.includes(t) || ser.includes(t);
+          });
         });
       }
     }
 
     setDisplayedBooks(result);
-  }, [searchQuery, allBooks, shelfTheme, ignoreTheme]);
+  }, [searchQuery, allBooks, shelfThemes, ignoreTheme]);
 
   const handleAddToShelf = async (item: any) => {
     if (!levelId) return;
@@ -138,13 +143,13 @@ export default function AddToShelfScreen() {
       
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <Text style={styles.title}>Выберите комикс</Text>
-        {shelfTheme && (
+        {shelfThemes.length > 0 && (
           <TouchableOpacity 
             style={[styles.themeBadge, ignoreTheme && { backgroundColor: '#ccc' }]} 
             onPress={() => setIgnoreTheme(!ignoreTheme)}
           >
             <Text style={styles.themeText}>
-              {ignoreTheme ? 'Тема отключена' : `Тема: ${shelfTheme}`}
+              {ignoreTheme ? 'Тема отключена' : `Тема: ${shelfThemes.join(', ')}`}
             </Text>
           </TouchableOpacity>
         )}
@@ -177,7 +182,7 @@ export default function AddToShelfScreen() {
           ListEmptyComponent={
             <View style={{ alignItems: 'center', marginTop: 50 }}>
               <Text style={{ color: '#888', marginBottom: 10 }}>Ничего не найдено</Text>
-              {shelfTheme && !ignoreTheme && (
+              {shelfThemes.length > 0 && !ignoreTheme && (
                 <TouchableOpacity onPress={() => setIgnoreTheme(true)} style={{ padding: 10, backgroundColor: '#e6f2ff', borderRadius: 8 }}>
                   <Text style={{ color: '#007AFF', fontWeight: 'bold' }}>Искать по всем книгам</Text>
                 </TouchableOpacity>
